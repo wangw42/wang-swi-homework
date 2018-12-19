@@ -434,12 +434,18 @@ $ ./tty.out
 
 3. 函数设计
 
-*先只实现了自动的功能，其他将继续更新*
+*还有一些功能仍未完善*
 
 ```c
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <termios.h>
+#include <unistd.h>
 
 #define SNAKE_MAX_LENGTH 20
 #define SNAKE_HEAD 'H'
@@ -456,6 +462,7 @@ int Fx = 0, Fy = 0;//食物坐标
 int Hx = 1, Hy = 5;//蛇头坐标
 int X[SNAKE_MAX_LENGTH]={1,1,1,1,1};//sanke
 int Y[SNAKE_MAX_LENGTH]={1,2,3,4,5};//snake
+
 char map[12][12] =
    {"************",
     "*XXXXH     *",
@@ -470,14 +477,132 @@ char map[12][12] =
     "*          *",
     "************",};
 
+void snakeMove(int x, int y);
+void put_money(void);
+void output(void);
+void gameover(void);
+char whereGoNext(int Hx, int Hy, int Fx, int Fy);
+
+static struct termios ori_attr, cur_attr;
+
+static __inline
+int tty_reset(void)
+{
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &ori_attr) != 0)
+        return -1;
+    
+    return 0;
+}
+
+
+static __inline
+int tty_set(void)
+{
+    
+    if ( tcgetattr(STDIN_FILENO, &ori_attr) )
+        return -1;
+    
+    memcpy(&cur_attr, &ori_attr, sizeof(cur_attr) );
+    cur_attr.c_lflag &= ~ICANON;
+    //        cur_attr.c_lflag |= ECHO;
+    cur_attr.c_lflag &= ~ECHO;
+    cur_attr.c_cc[VMIN] = 1;
+    cur_attr.c_cc[VTIME] = 0;
+    
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &cur_attr) != 0)
+        return -1;
+    
+    return 0;
+}
+
+static __inline
+int kbhit(void)
+{
+    
+    fd_set rfds;
+    struct timeval tv;
+    int retval;
+ 
+    FD_ZERO(&rfds);
+    FD_SET(0, &rfds);
+ 
+    tv.tv_sec  = 0;
+    tv.tv_usec = 0;
+    
+    retval = select(1, &rfds, NULL, NULL, &tv);
+ 
+    
+    if (retval == -1) {
+        perror("select()");
+        return 0;
+    } else if (retval)
+        return 1;
+ 
+    else
+        return 0;
+    return 0;
+}
+
+int main() {
+    //设置终端进入非缓冲状态
+    int tty_set_flag;
+    tty_set_flag = tty_set();
+    
+    put_money();
+    output();
+    
+    while (1) {
+        put_money();
+        char ch = whereGoNext(Hx, Hy, Fx, Fy);
+        switch (ch) {
+            case 'A':
+                snakeMove(0, -1); break;
+            case 'S':
+                snakeMove(1, 0); break;
+            case 'D':
+                snakeMove(0, 1); break;
+            case 'W':
+                snakeMove(-1, 0); break;
+        }
+        system("cls");
+        if (life != 0) {
+            gameover();
+            break;
+        }
+        if (len == 20) {
+            printf("you win!!!");
+            break;
+        }
+        output();
+    }
+    
+    printf("pressed `q` to quit!\n");
+    while(1) {
+        
+        if( kbhit() ) {
+            const int key = getchar();
+            printf("%c pressed\n", key);
+            if(key == 'q')
+                break;
+        } else {
+            ;// fprintf(stderr, "<no key detected>\n");
+        }
+    }
+    
+    //恢复终端设置
+    if(tty_set_flag == 0)
+        tty_reset();
+    return 0;
+}
+
 void snakeMove(int x, int y) {
     int i;
     if ((X[len - 1] - X[len - 2] == -x && Y[len - 1] == Y[len - 2]) || (Y[len - 1] - Y[len - 2] == -y && X[len - 1] == X[len - 2])) {
         return;
-    }
+    }//若键盘输入的方向与蛇头方向相反，则什么事都不发生
     if (map[X[len - 1] + x][Y[len - 1] + y] == WALL_CELL || map[X[len - 1] + x][Y[len - 1] + y] == SNAKE_BODY) {
         life++;
-    }
+    }//若碰到墙壁或者自己就死掉
     if (map[X[len - 1] + x][Y[len - 1] + y] == SNAKE_FOOD) {
         map[X[len - 1]][Y[len - 1]] = SNAKE_BODY;
         map[X[len - 1] + x][Y[len - 1] + y] = SNAKE_HEAD;
@@ -487,7 +612,7 @@ void snakeMove(int x, int y) {
         Hx = X[len - 1];
         Hy = Y[len - 1];
         food--;
-    }
+    }//碰到食物就增长
     else {
         map[X[0]][Y[0]] = BLANK_CELL;
         for (i = 0; i < len - 1; i++) {
@@ -502,7 +627,7 @@ void snakeMove(int x, int y) {
         for (i = 0; i < len - 1; i++) {
             map[X[i]][Y[i]] = SNAKE_BODY;
         }
-    }
+    }//没碰到食物
     
 }
 void put_money(void) {
@@ -556,36 +681,9 @@ char whereGoNext(int Hx, int Hy, int Fx, int Fy) {
     }
     return moveble[temp];
 }
-int main() {
-    put_money();
-    output();
-    while (1) {
-        put_money();
-        char ch = whereGoNext(Hx, Hy, Fx, Fy);
-        switch (ch) {
-            case 'A':
-                snakeMove(0, -1); break;
-            case 'S':
-                snakeMove(1, 0); break;
-            case 'D':
-                snakeMove(0, 1); break;
-            case 'W':
-                snakeMove(-1, 0); break;
-        }
-        system("cls");
-        if (life != 0) {
-            gameover();
-            break;
-        }
-        if (len == 20) {
-            printf("you win!!!");
-            break;
-        }
-        output();
-    }
-}
 ```
 
 4. 预览
 
+![](images/lab14_4.gif)
 ![](images/lab14_3.png)
